@@ -47,8 +47,8 @@ SET(OpenMVS_USE_FAST_INVSQRT OFF CACHE BOOL "Use an optimized code to compute th
 SET(OpenMVS_USE_FAST_CBRT ON CACHE BOOL "Use an optimized code to compute the cubic root")
 SET(OpenMVS_USE_SSE ON CACHE BOOL "Enable SSE optimizations")
 SET(OpenMVS_USE_OPENMP ON CACHE BOOL "Enable OpenMP library")
-SET(OpenMVS_USE_OPENGL ON CACHE BOOL "Enable OpenGL library")
-SET(OpenMVS_USE_CUDA ON CACHE BOOL "Enable CUDA library")
+SET(OpenMVS_USE_OPENGL OFF CACHE BOOL "Enable OpenGL library")
+SET(OpenMVS_USE_CUDA OFF CACHE BOOL "Enable CUDA library")
 SET(OpenMVS_USE_BREAKPAD ON CACHE BOOL "Enable BreakPad library")
 SET(OpenMVS_CONFIG_INCLUDE_DIR "${CMAKE_BINARY_DIR}/" CACHE PATH "Where to create the build/platform specific header")
 

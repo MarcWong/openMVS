@@ -609,7 +609,7 @@ void* STCALL DepthMapsData::EndDepthMapTmp(void* arg)
 		float& conf = estimator.confMap0(x);
 		// check if the score is good enough
 		// and that the cross-estimates is close enough to the current estimate
-		if (depth <= 0 || conf >= OPTDENSE::fNCCThresholdKeep) {
+		if (0) {
 			#if 1 // used if gap-interpolation is active
 			conf = 0;
 			estimator.normalMap0(x) = Normal::ZERO;
