@@ -1037,10 +1037,12 @@ unsigned MVS::EstimatePlaneThLockFirstPoint(const Point3Arr& points, Plane& plan
 } // EstimatePlaneThLockFirstPoint
 /*----------------------------------------------------------------*/
 
-
+#include<fstream>
 // estimate the colors of the given dense point cloud
 void MVS::EstimatePointColors(const ImageArr& images, PointCloud& pointcloud)
 {
+	using namespace std;
+	std::fstream file("/data1/Dataset/test/output.txt");
 	TD_TIMER_START();
 
 	pointcloud.colors.Resize(pointcloud.points.GetSize());
@@ -1048,9 +1050,18 @@ void MVS::EstimatePointColors(const ImageArr& images, PointCloud& pointcloud)
 		PointCloud::Color& color = pointcloud.colors[i];
 		const PointCloud::Point& point = pointcloud.points[i];
 		const PointCloud::ViewArr& views= pointcloud.pointViews[i];
+
+		file<<"v "<<point.x<<" "<<point.y<<" "<<point.z<<endl;
+
 		// compute vertex color
 		REAL bestDistance(FLT_MAX);
 		const Image* pImageData(NULL);
+
+		int countview=0;
+		FOREACHPTR(pView, views) {
+			countview=countview+1;
+		}
+		file<<countview<<endl;
 		FOREACHPTR(pView, views) {
 			const Image& imageData = images[*pView];
 			ASSERT(imageData.IsValid());
@@ -1059,6 +1070,8 @@ void MVS::EstimatePointColors(const ImageArr& images, PointCloud& pointcloud)
 			// compute the distance from the 3D point to the image
 			const REAL distance(imageData.camera.PointDepth(point));
 			ASSERT(distance > 0);
+			Point2f proj(imageData.camera.ProjectPointP(point));
+			file<<*pView<<" "<<proj.x<<" "<<proj.y<<endl;
 			if (bestDistance > distance) {
 				bestDistance = distance;
 				pImageData = &imageData;
