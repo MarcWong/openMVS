@@ -1037,12 +1037,15 @@ unsigned MVS::EstimatePlaneThLockFirstPoint(const Point3Arr& points, Plane& plan
 } // EstimatePlaneThLockFirstPoint
 /*----------------------------------------------------------------*/
 
+#include<iostream>
 #include<fstream>
 // estimate the colors of the given dense point cloud
 void MVS::EstimatePointColors(const ImageArr& images, PointCloud& pointcloud)
 {
 	using namespace std;
-	std::fstream file("/data1/Dataset/test/output.txt");
+	std::fstream file;
+	file.open("/data1/Dataset/test/output.txt", ios::out);
+
 	TD_TIMER_START();
 
 	pointcloud.colors.Resize(pointcloud.points.GetSize());
