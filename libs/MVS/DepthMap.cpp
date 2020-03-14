@@ -1044,7 +1044,7 @@ void MVS::EstimatePointColors(const ImageArr& images, PointCloud& pointcloud)
 {
 	using namespace std;
 	std::fstream file;
-	file.open("/data1/Dataset/test/output.txt", ios::out);
+	file.open("/data1/Dataset/output.txt", ios::out);
 
 	TD_TIMER_START();
 

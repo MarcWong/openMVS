@@ -670,11 +670,11 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 		InitDepthMap(depthData);
 		#if TD_VERBOSE != TD_VERBOSE_OFF
 		// save rough depth map as image
-		if (g_nVerbosityLevel > 4) {
+		// if (g_nVerbosityLevel > 4) {
 			ExportDepthMap(ComposeDepthFilePath(image.GetID(), "init.png"), depthData.depthMap);
 			ExportNormalMap(ComposeDepthFilePath(image.GetID(), "init.normal.png"), depthData.normalMap);
 			ExportPointCloud(ComposeDepthFilePath(image.GetID(), "init.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
-		}
+		// }
 		#endif
 	}
 
@@ -723,11 +723,11 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 		estimators.Release();
 		#if TD_VERBOSE != TD_VERBOSE_OFF
 		// save rough depth map as image
-		if (g_nVerbosityLevel > 4) {
+		// if (g_nVerbosityLevel > 4) {
 			ExportDepthMap(ComposeDepthFilePath(image.GetID(), "rough.png"), depthData.depthMap);
 			ExportNormalMap(ComposeDepthFilePath(image.GetID(), "rough.normal.png"), depthData.normalMap);
 			ExportPointCloud(ComposeDepthFilePath(image.GetID(), "rough.ply"), *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
-		}
+		// }
 		#endif
 	}
 
@@ -754,12 +754,12 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 		estimators.Release();
 		#if 1 && TD_VERBOSE != TD_VERBOSE_OFF
 		// save intermediate depth map as image
-		if (g_nVerbosityLevel > 4) {
+		// if (g_nVerbosityLevel > 4) {
 			const String path(ComposeDepthFilePath(image.GetID(), "iter")+String::ToString(iter));
 			ExportDepthMap(path+".png", depthData.depthMap);
 			ExportNormalMap(path+".normal.png", depthData.normalMap);
 			ExportPointCloud(path+".ply", *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
-		}
+		// }
 		#endif
 	}
 
