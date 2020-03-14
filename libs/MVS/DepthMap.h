@@ -440,6 +440,13 @@ struct MVS_API DepthEstimator {
 
 
 // Tools
+bool TriangulatePoints2DepthMap(
+	const DepthData::ViewData& image, const PointCloud& pointcloud, const IndexArr& points,
+	DepthMap& depthMap, NormalMap& normalMap, Depth& dMin, Depth& dMax);
+bool TriangulatePoints2DepthMap(
+	const DepthData::ViewData& image, const PointCloud& pointcloud, const IndexArr& points,
+	DepthMap& depthMap, Depth& dMin, Depth& dMax);
+
 MVS_API unsigned EstimatePlane(const Point3Arr&, Plane&, double& maxThreshold, bool arrInliers[]=NULL, size_t maxIters=0);
 MVS_API unsigned EstimatePlaneLockFirstPoint(const Point3Arr&, Plane&, double& maxThreshold, bool arrInliers[]=NULL, size_t maxIters=0);
 MVS_API unsigned EstimatePlaneTh(const Point3Arr&, Plane&, double maxThreshold, bool arrInliers[]=NULL, size_t maxIters=0);
@@ -447,6 +454,8 @@ MVS_API unsigned EstimatePlaneThLockFirstPoint(const Point3Arr&, Plane&, double 
 
 MVS_API void EstimatePointColors(const ImageArr& images, PointCloud& pointcloud);
 MVS_API void EstimatePointNormals(const ImageArr& images, PointCloud& pointcloud, int numNeighbors=16/*K-nearest neighbors*/);
+
+MVS_API bool EstimateNormalMap(const Matrix3x3f& K, const DepthMap&, NormalMap&);
 
 MVS_API bool SaveDepthMap(const String& fileName, const DepthMap& depthMap);
 MVS_API bool LoadDepthMap(const String& fileName, DepthMap& depthMap);
@@ -460,12 +469,12 @@ MVS_API bool ExportNormalMap(const String& fileName, const NormalMap& normalMap)
 MVS_API bool ExportConfidenceMap(const String& fileName, const ConfidenceMap& confMap);
 MVS_API bool ExportPointCloud(const String& fileName, const Image&, const DepthMap&, const NormalMap&);
 
-MVS_API bool ExportDepthDataRaw(const String&,
+MVS_API bool ExportDepthDataRaw(const String&, const String& imageFileName,
 	const IIndexArr&, const cv::Size& imageSize,
 	const KMatrix&, const RMatrix&, const CMatrix&,
 	Depth dMin, Depth dMax,
 	const DepthMap&, const NormalMap&, const ConfidenceMap&);
-MVS_API bool ImportDepthDataRaw(const String&,
+MVS_API bool ImportDepthDataRaw(const String&, String& imageFileName,
 	IIndexArr&, cv::Size& imageSize,
 	KMatrix&, RMatrix&, CMatrix&,
 	Depth& dMin, Depth& dMax,

@@ -32,6 +32,10 @@
 #include "Common.h"
 #include "DepthMap.h"
 #include "../Common/AutoEstimator.h"
+// CGAL: depth-map initialization
+#include <CGAL/Simple_cartesian.h>
+#include <CGAL/Delaunay_triangulation_2.h>
+#include <CGAL/Projection_traits_xy_3.h>
 // CGAL: estimate normals
 #include <CGAL/Simple_cartesian.h>
 #include <CGAL/property_map.h>
@@ -194,7 +198,7 @@ bool DepthData::Save(const String& fileName) const
 		for (const ViewData& image: images)
 			IDs.push_back(image.GetID());
 		const ViewData& image0 = GetView();
-		if (!ExportDepthDataRaw(fileNameTmp, IDs, depthMap.size(), image0.camera.K, image0.camera.R, image0.camera.C, dMin, dMax, depthMap, normalMap, confMap))
+		if (!ExportDepthDataRaw(fileNameTmp, image0.pImageData->name, IDs, depthMap.size(), image0.camera.K, image0.camera.R, image0.camera.C, dMin, dMax, depthMap, normalMap, confMap))
 			return false;
 	}
 	if (!File::renameFile(fileNameTmp, fileName)) {
@@ -208,10 +212,11 @@ bool DepthData::Load(const String& fileName)
 {
 	ASSERT(IsValid());
 	// serialize in the saved state
+	String imageFileName;
 	IIndexArr IDs;
 	cv::Size imageSize;
 	Camera camera;
-	if (!ImportDepthDataRaw(fileName, IDs, imageSize, camera.K, camera.R, camera.C, dMin, dMax, depthMap, normalMap, confMap))
+	if (!ImportDepthDataRaw(fileName, imageFileName, IDs, imageSize, camera.K, camera.R, camera.C, dMin, dMax, depthMap, normalMap, confMap))
 		return false;
 	ASSERT(IDs.size() == images.size());
 	ASSERT(IDs.front() == GetView().GetID());
@@ -907,6 +912,216 @@ DepthEstimator::PixelEstimate DepthEstimator::PerturbEstimate(const PixelEstimat
 
 // S T R U C T S ///////////////////////////////////////////////////
 
+namespace CGAL {
+typedef CGAL::Simple_cartesian<double> kernel_t;
+typedef CGAL::Projection_traits_xy_3<kernel_t> Geometry;
+typedef CGAL::Delaunay_triangulation_2<Geometry> Delaunay;
+typedef CGAL::Delaunay::Face_circulator FaceCirculator;
+typedef CGAL::Delaunay::Face_handle FaceHandle;
+typedef CGAL::Delaunay::Vertex_circulator VertexCirculator;
+typedef CGAL::Delaunay::Vertex_handle VertexHandle;
+typedef kernel_t::Point_3 Point;
+}
+
+// triangulate in-view points, generating a 2D mesh
+// return also the estimated depth boundaries (min and max depth)
+std::pair<float,float> TriangulatePointsDelaunay(const DepthData::ViewData& image, const PointCloud& pointcloud, const IndexArr& points, CGAL::Delaunay& delaunay)
+{
+	ASSERT(sizeof(Point3) == sizeof(X3D));
+	ASSERT(sizeof(Point3) == sizeof(CGAL::Point));
+	std::pair<float,float> depthBounds(FLT_MAX, 0.f);
+	for (uint32_t idx: points) {
+		const Point3f pt(image.camera.ProjectPointP3(pointcloud.points[idx]));
+		delaunay.insert(CGAL::Point(pt.x/pt.z, pt.y/pt.z, pt.z));
+		if (depthBounds.first > pt.z)
+			depthBounds.first = pt.z;
+		if (depthBounds.second < pt.z)
+			depthBounds.second = pt.z;
+	}
+	// if full size depth-map requested
+	if (OPTDENSE::bAddCorners) {
+		typedef TIndexScore<float,float> DepthDist;
+		typedef CLISTDEF0(DepthDist) DepthDistArr;
+		typedef Eigen::Map< Eigen::VectorXf, Eigen::Unaligned, Eigen::InnerStride<2> > FloatMap;
+		// add the four image corners at the average depth
+		ASSERT(image.pImageData->IsValid() && ISINSIDE(image.pImageData->avgDepth, depthBounds.first, depthBounds.second));
+		const CGAL::VertexHandle vcorners[] = {
+			delaunay.insert(CGAL::Point(0, 0, image.pImageData->avgDepth)),
+			delaunay.insert(CGAL::Point(image.image.width(), 0, image.pImageData->avgDepth)),
+			delaunay.insert(CGAL::Point(0, image.image.height(), image.pImageData->avgDepth)),
+			delaunay.insert(CGAL::Point(image.image.width(), image.image.height(), image.pImageData->avgDepth))
+		};
+		// compute average depth from the closest 3 directly connected faces,
+		// weighted by the distance
+		const size_t numPoints = 3;
+		for (int i=0; i<4; ++i) {
+			const CGAL::VertexHandle vcorner = vcorners[i];
+			CGAL::FaceCirculator cfc(delaunay.incident_faces(vcorner));
+			if (cfc == 0)
+				continue; // normally this should never happen
+			const CGAL::FaceCirculator done(cfc);
+			Point3d& poszA = reinterpret_cast<Point3d&>(vcorner->point());
+			const Point2d& posA = reinterpret_cast<const Point2d&>(poszA);
+			const Ray3d rayA(Point3d::ZERO, normalized(image.camera.TransformPointI2C(poszA)));
+			DepthDistArr depths(0, numPoints);
+			do {
+				CGAL::FaceHandle fc(cfc->neighbor(cfc->index(vcorner)));
+				if (fc == delaunay.infinite_face())
+					continue;
+				for (int j=0; j<4; ++j)
+					if (fc->has_vertex(vcorners[j]))
+						goto Continue;
+				// compute the depth as the intersection of the corner ray with
+				// the plane defined by the face's vertices
+				{
+				const Point3d& poszB0 = reinterpret_cast<const Point3d&>(fc->vertex(0)->point());
+				const Point3d& poszB1 = reinterpret_cast<const Point3d&>(fc->vertex(1)->point());
+				const Point3d& poszB2 = reinterpret_cast<const Point3d&>(fc->vertex(2)->point());
+				const Planed planeB(
+					image.camera.TransformPointI2C(poszB0),
+					image.camera.TransformPointI2C(poszB1),
+					image.camera.TransformPointI2C(poszB2)
+				);
+				const Point3d poszB(rayA.Intersects(planeB));
+				if (poszB.z <= 0)
+					continue;
+				const Point2d posB((
+					reinterpret_cast<const Point2d&>(poszB0)+
+					reinterpret_cast<const Point2d&>(poszB1)+
+					reinterpret_cast<const Point2d&>(poszB2))/3.f
+				);
+				const double dist(norm(posB-posA));
+				depths.StoreTop<numPoints>(DepthDist(CLAMP((float)poszB.z,depthBounds.first,depthBounds.second), INVERT((float)dist)));
+				}
+				Continue:;
+			} while (++cfc != done);
+			if (depths.size() != numPoints)
+				continue; // normally this should never happen
+			FloatMap vecDists(&depths[0].score, numPoints);
+			vecDists *= 1.f/vecDists.sum();
+			FloatMap vecDepths(&depths[0].idx, numPoints);
+			poszA.z = vecDepths.dot(vecDists);
+		}
+	}
+	return depthBounds;
+}
+
+// roughly estimate depth and normal maps by triangulating the sparse point cloud
+// and interpolating normal and depth for all pixels
+bool MVS::TriangulatePoints2DepthMap(
+	const DepthData::ViewData& image, const PointCloud& pointcloud, const IndexArr& points,
+	DepthMap& depthMap, NormalMap& normalMap, Depth& dMin, Depth& dMax)
+{
+	ASSERT(image.pImageData != NULL);
+
+	// triangulate in-view points
+	CGAL::Delaunay delaunay;
+	const std::pair<float,float> thDepth(TriangulatePointsDelaunay(image, pointcloud, points, delaunay));
+	dMin = thDepth.first;
+	dMax = thDepth.second;
+
+	// create rough depth-map by interpolating inside triangles
+	const Camera& camera = image.camera;
+	depthMap.create(image.image.size());
+	normalMap.create(image.image.size());
+	if (!OPTDENSE::bAddCorners) {
+		depthMap.memset(0);
+		normalMap.memset(0);
+	}
+	struct RasterDepthDataPlaneData {
+		const Camera& P;
+		DepthMap& depthMap;
+		NormalMap& normalMap;
+		Point3f normal;
+		Point3f normalPlane;
+		inline void operator()(const ImageRef& pt) {
+			if (!depthMap.isInside(pt))
+				return;
+			const Depth z(INVERT(normalPlane.dot(P.TransformPointI2C(Point2f(pt)))));
+			if (z <= 0) // due to numerical instability
+				return;
+			depthMap(pt) = z;
+			normalMap(pt) = normal;
+		}
+	};
+	RasterDepthDataPlaneData data = {camera, depthMap, normalMap};
+	for (CGAL::Delaunay::Face_iterator it=delaunay.faces_begin(); it!=delaunay.faces_end(); ++it) {
+		const CGAL::Delaunay::Face& face = *it;
+		const Point3f i0(reinterpret_cast<const Point3d&>(face.vertex(0)->point()));
+		const Point3f i1(reinterpret_cast<const Point3d&>(face.vertex(1)->point()));
+		const Point3f i2(reinterpret_cast<const Point3d&>(face.vertex(2)->point()));
+		// compute the plane defined by the 3 points
+		const Point3f c0(camera.TransformPointI2C(i0));
+		const Point3f c1(camera.TransformPointI2C(i1));
+		const Point3f c2(camera.TransformPointI2C(i2));
+		const Point3f edge1(c1-c0);
+		const Point3f edge2(c2-c0);
+		data.normal = normalized(edge2.cross(edge1));
+		data.normalPlane = data.normal * INVERT(data.normal.dot(c0));
+		// draw triangle and for each pixel compute depth as the ray intersection with the plane
+		Image8U::RasterizeTriangle(
+			reinterpret_cast<const Point2f&>(i2),
+			reinterpret_cast<const Point2f&>(i1),
+			reinterpret_cast<const Point2f&>(i0), data);
+	}
+	return true;
+} // TriangulatePoints2DepthMap
+// same as above, but does not estimate the normal-map
+bool MVS::TriangulatePoints2DepthMap(
+	const DepthData::ViewData& image, const PointCloud& pointcloud, const IndexArr& points,
+	DepthMap& depthMap, Depth& dMin, Depth& dMax)
+{
+	ASSERT(image.pImageData != NULL);
+
+	// triangulate in-view points
+	CGAL::Delaunay delaunay;
+	const std::pair<float,float> thDepth(TriangulatePointsDelaunay(image, pointcloud, points, delaunay));
+	dMin = thDepth.first;
+	dMax = thDepth.second;
+
+	// create rough depth-map by interpolating inside triangles
+	const Camera& camera = image.camera;
+	depthMap.create(image.image.size());
+	if (!OPTDENSE::bAddCorners)
+		depthMap.memset(0);
+	struct RasterDepthDataPlaneData {
+		const Camera& P;
+		DepthMap& depthMap;
+		Point3f normalPlane;
+		inline void operator()(const ImageRef& pt) {
+			if (!depthMap.isInside(pt))
+				return;
+			const Depth z((Depth)INVERT(normalPlane.dot(P.TransformPointI2C(Point2f(pt)))));
+			if (z <= 0) // due to numerical instability
+				return;
+			depthMap(pt) = z;
+		}
+	};
+	RasterDepthDataPlaneData data = {camera, depthMap};
+	for (CGAL::Delaunay::Face_iterator it=delaunay.faces_begin(); it!=delaunay.faces_end(); ++it) {
+		const CGAL::Delaunay::Face& face = *it;
+		const Point3f i0(reinterpret_cast<const Point3d&>(face.vertex(0)->point()));
+		const Point3f i1(reinterpret_cast<const Point3d&>(face.vertex(1)->point()));
+		const Point3f i2(reinterpret_cast<const Point3d&>(face.vertex(2)->point()));
+		// compute the plane defined by the 3 points
+		const Point3f c0(camera.TransformPointI2C(i0));
+		const Point3f c1(camera.TransformPointI2C(i1));
+		const Point3f c2(camera.TransformPointI2C(i2));
+		const Point3f edge1(c1-c0);
+		const Point3f edge2(c2-c0);
+		const Normal normal(normalized(edge2.cross(edge1)));
+		data.normalPlane = normal * INVERT(normal.dot(c0));
+		// draw triangle and for each pixel compute depth as the ray intersection with the plane
+		Image8U::RasterizeTriangle(
+			reinterpret_cast<const Point2f&>(i2),
+			reinterpret_cast<const Point2f&>(i1),
+			reinterpret_cast<const Point2f&>(i0), data);
+	}
+	return true;
+} // TriangulatePoints2DepthMap
+/*----------------------------------------------------------------*/
+
+
 namespace MVS {
 
 class PlaneSolverAdaptor
@@ -1110,6 +1325,7 @@ void MVS::EstimatePointNormals(const ImageArr& images, PointCloud& pointcloud, i
 	// estimates normals direction;
 	// Note: pca_estimate_normals() requires an iterator over points
 	// as well as property maps to access each point's position and normal.
+	#if CGAL_VERSION_NR < 1041301000
 	#if CGAL_VERSION_NR < 1040800000
 	CGAL::pca_estimate_normals(
 	#else
@@ -1120,6 +1336,13 @@ void MVS::EstimatePointNormals(const ImageArr& images, PointCloud& pointcloud, i
 		CGAL::Second_of_pair_property_map<PointVectorPair>(),
 		numNeighbors
 	);
+	#else
+	CGAL::pca_estimate_normals<CGAL::Sequential_tag>(
+		pointvectors, numNeighbors,
+		CGAL::parameters::point_map(CGAL::First_of_pair_property_map<PointVectorPair>())
+		.normal_map(CGAL::Second_of_pair_property_map<PointVectorPair>())
+	);
+	#endif
 	// store the point normals
 	pointcloud.normals.Resize(pointcloud.points.GetSize());
 	FOREACH(i, pointcloud.normals) {
@@ -1136,6 +1359,100 @@ void MVS::EstimatePointNormals(const ImageArr& images, PointCloud& pointcloud, i
 
 	DEBUG_ULTIMATE("Estimate dense point cloud normals: %u normals (%s)", pointcloud.normals.GetSize(), TD_TIMER_GET_FMT().c_str());
 } // EstimatePointNormals
+/*----------------------------------------------------------------*/
+
+bool MVS::EstimateNormalMap(const Matrix3x3f& K, const DepthMap& depthMap, NormalMap& normalMap)
+{
+	normalMap.create(depthMap.size());
+	struct Tool {
+		static bool IsDepthValid(Depth d, Depth nd) {
+			return nd > 0 && IsDepthSimilar(d, nd, Depth(0.03f));
+		}
+		// computes depth gradient (first derivative) at current pixel
+		static bool DepthGradient(const DepthMap& depthMap, const ImageRef& ir, Point3f& ws) {
+			float& w  = ws[0];
+			float& wx = ws[1];
+			float& wy = ws[2];
+			w = depthMap(ir);
+			if (w <= 0)
+				return false;
+			// loop over neighborhood and finding least squares plane,
+			// the coefficients of which give gradient of depth
+			int whxx(0), whxy(0), whyy(0);
+			float wgx(0), wgy(0);
+			const int Radius(1);
+			int n(0);
+			for (int y = -Radius; y <= Radius; ++y) {
+				for (int x = -Radius; x <= Radius; ++x) {
+					if (x == 0 && y == 0)
+						continue;
+					const ImageRef pt(ir.x+x, ir.y+y);
+					if (!depthMap.isInside(pt))
+						continue;
+					const float wi(depthMap(pt));
+					if (!IsDepthValid(w, wi))
+						continue;
+					whxx += x*x; whxy += x*y; whyy += y*y;
+					wgx += (wi - w)*x; wgy += (wi - w)*y;
+					++n;
+				}
+			}
+			if (n < 3)
+				return false;
+			// solve 2x2 system, generated from depth gradient
+			const int det(whxx*whyy - whxy*whxy);
+			if (det == 0)
+				return false;
+			const float invDet(1.f/float(det));
+			wx = (float( whyy)*wgx - float(whxy)*wgy)*invDet;
+			wy = (float(-whxy)*wgx + float(whxx)*wgy)*invDet;
+			return true;
+		}
+		// computes normal to the surface given the depth and its gradient
+		static Normal ComputeNormal(const Matrix3x3f& K, int x, int y, Depth d, Depth dx, Depth dy) {
+			ASSERT(ISZERO(K(0,1)));
+			return normalized(Normal(
+				K(0,0)*dx,
+				K(1,1)*dy,
+				(K(0,2)-float(x))*dx+(K(1,2)-float(y))*dy-d
+			));
+		}
+	};
+	for (int r=0; r<normalMap.rows; ++r) {
+		for (int c=0; c<normalMap.cols; ++c) {
+			#if 0
+			const Depth d(depthMap(r,c));
+			if (d <= 0) {
+				normalMap(r,c) = Normal::ZERO;
+				continue;
+			}
+			Depth dl, du;
+			if (depthMap.isInside(ImageRef(c-1,r-1)) && Tool::IsDepthValid(d, dl=depthMap(r,c-1)) &&  Tool::IsDepthValid(d, du=depthMap(r-1,c)))
+				normalMap(r,c) = Tool::ComputeNormal(K, c, r, d, du-d, dl-d);
+			else
+			if (depthMap.isInside(ImageRef(c+1,r-1)) && Tool::IsDepthValid(d, dl=depthMap(r,c+1)) &&  Tool::IsDepthValid(d, du=depthMap(r-1,c)))
+				normalMap(r,c) = Tool::ComputeNormal(K, c, r, d, du-d, d-dl);
+			else
+			if (depthMap.isInside(ImageRef(c+1,r+1)) && Tool::IsDepthValid(d, dl=depthMap(r,c+1)) &&  Tool::IsDepthValid(d, du=depthMap(r+1,c)))
+				normalMap(r,c) = Tool::ComputeNormal(K, c, r, d, d-du, d-dl);
+			else
+			if (depthMap.isInside(ImageRef(c-1,r+1)) && Tool::IsDepthValid(d, dl=depthMap(r,c-1)) &&  Tool::IsDepthValid(d, du=depthMap(r+1,c)))
+				normalMap(r,c) = Tool::ComputeNormal(K, c, r, d, d-du, dl-d);
+			else
+				normalMap(r,c) = Normal(0,0,-1);
+			#else
+			// calculates depth gradient at x
+			Normal& n = normalMap(r,c);
+			if (Tool::DepthGradient(depthMap, ImageRef(c,r), n))
+				n = Tool::ComputeNormal(K, c, r, n.x, n.y, n.z);
+			else
+				n = Normal::ZERO;
+			#endif
+			ASSERT(normalMap(r,c).dot(K.inv()*Point3f(float(c),float(r),1.f)) <= 0);
+		}
+	}
+	return true;
+} // EstimateNormalMap
 /*----------------------------------------------------------------*/
 
 
@@ -1403,8 +1720,8 @@ struct HeaderDepthDataRaw {
 	uint32_t imageWidth, imageHeight; // image resolution
 	uint32_t depthWidth, depthHeight; // depth-map resolution
 	float dMin, dMax; // depth range for this view
-	uint32_t nIDs; // number of view IDs
-	// view ID followed by neighbor view IDs: uint32_t* IDs
+	// image file name length followed by the characters: uint16_t nFileNameSize; char* FileName
+	// number of view IDs followed by view ID and neighbor view IDs: uint32_t nIDs; uint32_t* IDs
 	// camera, rotation and translation matrices (row-major): double K[3][3], R[3][3], C[3]
 	// depth, normal, confidence maps
 	inline HeaderDepthDataRaw() : name(0), type(0), padding(0) {}
@@ -1412,7 +1729,7 @@ struct HeaderDepthDataRaw {
 	int GetStep() const { return ROUND2INT((float)imageWidth/depthWidth); }
 };
 
-bool MVS::ExportDepthDataRaw(const String& fileName,
+bool MVS::ExportDepthDataRaw(const String& fileName, const String& imageFileName,
 	const IIndexArr& IDs, const cv::Size& imageSize,
 	const KMatrix& K, const RMatrix& R, const CMatrix& C,
 	Depth dMin, Depth dMax,
@@ -1438,16 +1755,24 @@ bool MVS::ExportDepthDataRaw(const String& fileName,
 	header.depthHeight = (uint32_t)depthMap.rows;
 	header.dMin = dMin;
 	header.dMax = dMax;
-	header.nIDs = IDs.size();
 	if (!normalMap.empty())
 		header.type |= HeaderDepthDataRaw::HAS_NORMAL;
 	if (!confMap.empty())
 		header.type |= HeaderDepthDataRaw::HAS_CONF;
 	fwrite(&header, sizeof(HeaderDepthDataRaw), 1, f);
 
+	// write image file name
+	STATIC_ASSERT(sizeof(String::value_type) == sizeof(char));
+	const String FileName(MAKE_PATH_REL(Util::getFullPath(Util::getFilePath(fileName)), Util::getFullPath(imageFileName)));
+	const uint16_t nFileNameSize((uint16_t)FileName.length());
+	fwrite(&nFileNameSize, sizeof(uint16_t), 1, f);
+	fwrite(FileName.c_str(), sizeof(char), nFileNameSize, f);
+
 	// write neighbor IDs
 	STATIC_ASSERT(sizeof(uint32_t) == sizeof(IIndex));
-	fwrite(IDs.data(), sizeof(IIndex), IDs.size(), f);
+	const uint32_t nIDs(IDs.size());
+	fwrite(&nIDs, sizeof(IIndex), 1, f);
+	fwrite(IDs.data(), sizeof(IIndex), nIDs, f);
 
 	// write pose
 	STATIC_ASSERT(sizeof(double) == sizeof(REAL));
@@ -1471,7 +1796,7 @@ bool MVS::ExportDepthDataRaw(const String& fileName,
 	return bRet;
 } // ExportDepthDataRaw
 
-bool MVS::ImportDepthDataRaw(const String& fileName,
+bool MVS::ImportDepthDataRaw(const String& fileName, String& imageFileName,
 	IIndexArr& IDs, cv::Size& imageSize,
 	KMatrix& K, RMatrix& R, CMatrix& C,
 	Depth& dMin, Depth& dMax,
@@ -1495,10 +1820,19 @@ bool MVS::ImportDepthDataRaw(const String& fileName,
 		return false;
 	}
 
+	// read image file name
+	STATIC_ASSERT(sizeof(String::value_type) == sizeof(char));
+	uint16_t nFileNameSize;
+	fread(&nFileNameSize, sizeof(uint16_t), 1, f);
+	imageFileName.resize(nFileNameSize);
+	fread(&imageFileName[0u], sizeof(char), nFileNameSize, f);
+
 	// read neighbor IDs
 	STATIC_ASSERT(sizeof(uint32_t) == sizeof(IIndex));
-	IDs.resize(header.nIDs);
-	fread(IDs.data(), sizeof(IIndex), IDs.size(), f);
+	uint32_t nIDs;
+	fread(&nIDs, sizeof(IIndex), 1, f);
+	IDs.resize(nIDs);
+	fread(IDs.data(), sizeof(IIndex), nIDs, f);
 
 	// read pose
 	STATIC_ASSERT(sizeof(double) == sizeof(REAL));
