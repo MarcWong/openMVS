@@ -506,6 +506,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 	const unsigned nMaxThreads(scene.nMaxThreads);
 
 	// initialize the depth-map
+	DEBUG_EXTRA("depth load: %8d .pfm", idxImage);
 	if (OPTDENSE::nMinViewsTrustPoint < 2) {
 		// compute depth range and initialize known depths
 		const int nPixelArea(2); // half windows size around a pixel to be initialize with the known depth
@@ -534,7 +535,17 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 		depthData.dMax *= 1.1f;
 	} else {
 		// compute rough estimates using the sparse point-cloud
+		// 20200322: Swap openMVS depth to MVSNet result
+		// using namespace std;
+		// fstream file;
+		// file.open("/data1/Dataset/debug.txt", ios::out);
+		// file<<"depth path:" << MAKE_PATH(String::FormatString("/data1/Dataset/Benchmark/tanksandtemples/test/depthMap/Family/depth_est/%08d.pfm",idxImage)) << endl;
+		// file<<"depth file:" << cv::imread(MAKE_PATH(String::FormatString("/data1/Dataset/Benchmark/tanksandtemples/test/depthMap/Family/depth_est/%08d.pfm",idxImage)),cv::IMREAD_ANYDEPTH|cv::IMREAD_ANYCOLOR) << endl;
+
+		depthData.depthMap = cv::MatExpr(cv::imread(MAKE_PATH(String::FormatString("/data1/Dataset/Benchmark/tanksandtemples/test/depthMap/Family/depth_est/%08d.pfm",idxImage)),cv::IMREAD_ANYDEPTH|cv::IMREAD_ANYCOLOR));
+
 		InitDepthMap(depthData);
+		
 	}
 
 	// init integral images and index to image-ref map for the reference data
@@ -591,36 +602,36 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 	}
 
 	// run propagation and random refinement cycles on the reference data
-	for (unsigned iter=0; iter<OPTDENSE::nEstimationIters; ++iter) {
+	//for (unsigned iter=0; iter<OPTDENSE::nEstimationIters; ++iter) {
 		// create working threads
-		idxPixel = -1;
-		ASSERT(estimators.IsEmpty());
-		while (estimators.GetSize() < nMaxThreads)
-			estimators.AddConstruct(iter, depthData, idxPixel,
-				#if DENSE_NCC == DENSE_NCC_WEIGHTED
-				weightMap0,
-				#else
-				imageSum0,
-				#endif
-				coords);
-		ASSERT(estimators.GetSize() == threads.GetSize()+1);
-		FOREACH(i, threads)
-			threads[i].start(EstimateDepthMapTmp, &estimators[i]);
-		EstimateDepthMapTmp(&estimators.Last());
+	//	idxPixel = -1;
+	//	ASSERT(estimators.IsEmpty());
+	//	while (estimators.GetSize() < nMaxThreads)
+	//		estimators.AddConstruct(iter, depthData, idxPixel,
+	//			#if DENSE_NCC == DENSE_NCC_WEIGHTED
+	//			weightMap0,
+	//			#else
+	//			imageSum0,
+	//			#endif
+	//			coords);
+	//	ASSERT(estimators.GetSize() == threads.GetSize()+1);
+	//	FOREACH(i, threads)
+	//		threads[i].start(EstimateDepthMapTmp, &estimators[i]);
+	//	EstimateDepthMapTmp(&estimators.Last());
 		// wait for the working threads to close
-		FOREACHPTR(pThread, threads)
-			pThread->join();
-		estimators.Release();
-		#if 1 && TD_VERBOSE != TD_VERBOSE_OFF
+	//	FOREACHPTR(pThread, threads)
+	//		pThread->join();
+	//	estimators.Release();
+	//	#if 1 && TD_VERBOSE != TD_VERBOSE_OFF
 		// save intermediate depth map as image
 		// if (g_nVerbosityLevel > 4) {
-			const String path(ComposeDepthFilePath(image.GetID(), "iter")+String::ToString(iter));
-			ExportDepthMap(path+".png", depthData.depthMap);
-			ExportNormalMap(path+".normal.png", depthData.normalMap);
-			ExportPointCloud(path+".ply", *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+	//		const String path(ComposeDepthFilePath(image.GetID(), "iter")+String::ToString(iter));
+	//		ExportDepthMap(path+".png", depthData.depthMap);
+	//		ExportNormalMap(path+".normal.png", depthData.normalMap);
+	//		ExportPointCloud(path+".ply", *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
 		// }
-		#endif
-	}
+	//	#endif
+	//}
 
 	// remove all estimates with too big score and invert confidence map
 	{
