@@ -542,7 +542,17 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 		// file<<"depth path:" << MAKE_PATH(String::FormatString("/data1/Dataset/Benchmark/tanksandtemples/test/depthMap/Family/depth_est/%08d.pfm",idxImage)) << endl;
 		// file<<"depth file:" << cv::imread(MAKE_PATH(String::FormatString("/data1/Dataset/Benchmark/tanksandtemples/test/depthMap/Family/depth_est/%08d.pfm",idxImage)),cv::IMREAD_ANYDEPTH|cv::IMREAD_ANYCOLOR) << endl;
 
-		depthData.depthMap = cv::MatExpr(cv::imread(MAKE_PATH(String::FormatString("/data1/Dataset/Benchmark/tanksandtemples/test/depthMap/Family/depth_est/%08d.pfm",idxImage)),cv::IMREAD_ANYDEPTH|cv::IMREAD_ANYCOLOR));
+		cv::Mat src, dsc;
+		src = cv::imread(MAKE_PATH(String::FormatString("/data1/Dataset/Benchmark/tanksandtemples/test/depthMap/Family/depth_est/%08d.pfm",idxImage)),cv::IMREAD_ANYDEPTH|cv::IMREAD_ANYCOLOR);
+
+		// for Family, Francis, Horse, Train
+		cv::copyMakeBorder(src,dsc,14,14,0,0,cv::BORDER_CONSTANT,0);
+		cv::resize(dsc,dsc,cv::Size(1080,1920));
+		// for M60,Panther, Lighthouse, Playground
+		//cv::copyMakeBorder(src,dsc,14,14,32,32,cv::BORDER_CONSTANT,0);
+		//cv::resize(dsc,dsc,cv::Size(1080,2048));
+
+		depthData.depthMap = cv::MatExpr(dsc);
 
 		InitDepthMap(depthData);
 		
