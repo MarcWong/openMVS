@@ -545,10 +545,10 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 		// cv::Mat src, dsc;
 		// src = cv::imread(MAKE_PATH(String::FormatString("/data1/Dataset/Benchmark/tanksandtemples/test/depthMap/Family/depth_est/%08d.pfm",idxImage)),cv::IMREAD_ANYDEPTH|cv::IMREAD_ANYCOLOR);
 
-		// for Family, Francis, Horse, Train
+		// for Family, Francis, Horse, Lighthouse, Train
 		// cv::copyMakeBorder(src,dsc,14,14,0,0,cv::BORDER_CONSTANT,0);
 		// cv::resize(dsc,dsc,cv::Size(1080,1920));
-		// for M60,Panther, Lighthouse, Playground
+		// for M60,Panther, Playground
 		//cv::copyMakeBorder(src,dsc,14,14,32,32,cv::BORDER_CONSTANT,0);
 		//cv::resize(dsc,dsc,cv::Size(1080,2048));
 
@@ -623,24 +623,24 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 				#else
 				imageSum0,
 				#endif
-        			coords);
+				coords);
 		ASSERT(estimators.GetSize() == threads.GetSize()+1);
 		FOREACH(i, threads)
 			threads[i].start(EstimateDepthMapTmp, &estimators[i]);
 		EstimateDepthMapTmp(&estimators.Last());
 		// wait for the working threads to close
-        	FOREACHPTR(pThread, threads)
+		FOREACHPTR(pThread, threads)
 			pThread->join();
 		estimators.Release();
 		#if 1 && TD_VERBOSE != TD_VERBOSE_OFF
 		// save intermediate depth map as image
 		if (g_nVerbosityLevel > 4) {
-        		const String path(ComposeDepthFilePath(image.GetID(), "iter")+String::ToString(iter));
+			const String path(ComposeDepthFilePath(image.GetID(), "iter")+String::ToString(iter));
 			ExportDepthMap(path+".png", depthData.depthMap);
 			ExportNormalMap(path+".normal.png", depthData.normalMap);
 			ExportPointCloud(path+".ply", *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
 		}
-        	#endif
+		#endif
 	}
 
 	// remove all estimates with too big score and invert confidence map
