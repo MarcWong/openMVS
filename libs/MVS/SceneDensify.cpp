@@ -542,17 +542,17 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 		// file<<"depth path:" << MAKE_PATH(String::FormatString("/data1/Dataset/Benchmark/tanksandtemples/test/depthMap/Family/depth_est/%08d.pfm",idxImage)) << endl;
 		// file<<"depth file:" << cv::imread(MAKE_PATH(String::FormatString("/data1/Dataset/Benchmark/tanksandtemples/test/depthMap/Family/depth_est/%08d.pfm",idxImage)),cv::IMREAD_ANYDEPTH|cv::IMREAD_ANYCOLOR) << endl;
 
-		cv::Mat src, dsc;
-		src = cv::imread(MAKE_PATH(String::FormatString("/data1/Dataset/Benchmark/tanksandtemples/test/depthMap/Family/depth_est/%08d.pfm",idxImage)),cv::IMREAD_ANYDEPTH|cv::IMREAD_ANYCOLOR);
+		// cv::Mat src, dsc;
+		// src = cv::imread(MAKE_PATH(String::FormatString("/data1/Dataset/Benchmark/tanksandtemples/test/depthMap/Family/depth_est/%08d.pfm",idxImage)),cv::IMREAD_ANYDEPTH|cv::IMREAD_ANYCOLOR);
 
-		// for Family, Francis, Horse, Train
-		cv::copyMakeBorder(src,dsc,14,14,0,0,cv::BORDER_CONSTANT,0);
-		cv::resize(dsc,dsc,cv::Size(1080,1920));
-		// for M60,Panther, Lighthouse, Playground
+		// for Family, Francis, Horse, Lighthouse, Train
+		// cv::copyMakeBorder(src,dsc,14,14,0,0,cv::BORDER_CONSTANT,0);
+		// cv::resize(dsc,dsc,cv::Size(1080,1920));
+		// for M60,Panther, Playground
 		//cv::copyMakeBorder(src,dsc,14,14,32,32,cv::BORDER_CONSTANT,0);
 		//cv::resize(dsc,dsc,cv::Size(1080,2048));
 
-		depthData.depthMap = cv::MatExpr(dsc);
+		// depthData.depthMap = cv::MatExpr(dsc);
 
 		InitDepthMap(depthData);
 		
@@ -612,36 +612,36 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 	}
 
 	// run propagation and random refinement cycles on the reference data
-	//for (unsigned iter=0; iter<OPTDENSE::nEstimationIters; ++iter) {
+	for (unsigned iter=0; iter<OPTDENSE::nEstimationIters; ++iter) {
 		// create working threads
-	//	idxPixel = -1;
-	//	ASSERT(estimators.IsEmpty());
-	//	while (estimators.GetSize() < nMaxThreads)
-	//		estimators.AddConstruct(iter, depthData, idxPixel,
-	//			#if DENSE_NCC == DENSE_NCC_WEIGHTED
-	//			weightMap0,
-	//			#else
-	//			imageSum0,
-	//			#endif
-	//			coords);
-	//	ASSERT(estimators.GetSize() == threads.GetSize()+1);
-	//	FOREACH(i, threads)
-	//		threads[i].start(EstimateDepthMapTmp, &estimators[i]);
-	//	EstimateDepthMapTmp(&estimators.Last());
+		idxPixel = -1;
+		ASSERT(estimators.IsEmpty());
+		while (estimators.GetSize() < nMaxThreads)
+			estimators.AddConstruct(iter, depthData, idxPixel,
+				#if DENSE_NCC == DENSE_NCC_WEIGHTED
+				weightMap0,
+				#else
+				imageSum0,
+				#endif
+				coords);
+		ASSERT(estimators.GetSize() == threads.GetSize()+1);
+		FOREACH(i, threads)
+			threads[i].start(EstimateDepthMapTmp, &estimators[i]);
+		EstimateDepthMapTmp(&estimators.Last());
 		// wait for the working threads to close
-	//	FOREACHPTR(pThread, threads)
-	//		pThread->join();
-	//	estimators.Release();
-	//	#if 1 && TD_VERBOSE != TD_VERBOSE_OFF
+		FOREACHPTR(pThread, threads)
+			pThread->join();
+		estimators.Release();
+		#if 1 && TD_VERBOSE != TD_VERBOSE_OFF
 		// save intermediate depth map as image
-		// if (g_nVerbosityLevel > 4) {
-	//		const String path(ComposeDepthFilePath(image.GetID(), "iter")+String::ToString(iter));
-	//		ExportDepthMap(path+".png", depthData.depthMap);
-	//		ExportNormalMap(path+".normal.png", depthData.normalMap);
-	//		ExportPointCloud(path+".ply", *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
-		// }
-	//	#endif
-	//}
+		if (g_nVerbosityLevel > 4) {
+			const String path(ComposeDepthFilePath(image.GetID(), "iter")+String::ToString(iter));
+			ExportDepthMap(path+".png", depthData.depthMap);
+			ExportNormalMap(path+".normal.png", depthData.normalMap);
+			ExportPointCloud(path+".ply", *depthData.images.First().pImageData, depthData.depthMap, depthData.normalMap);
+		}
+		#endif
+	}
 
 	// remove all estimates with too big score and invert confidence map
 	{

@@ -347,6 +347,7 @@ struct Image {
 		uint32_t idPoint;
 	};
 	uint32_t ID; // ID of the image
+	uint32_t clusterId;
 	Eigen::Quaterniond q; // rotation
 	Eigen::Vector3d t; // translation
 	uint32_t idCamera; // ID of the associated camera
@@ -374,6 +375,7 @@ struct Image {
 		if (!NextLine(stream, in))
 			return false;
 		in  >> ID
+			>> clusterId
 			>> q.w() >> q.x() >> q.y() >> q.z()
 			>> t(0) >> t(1) >> t(2)
 			>> idCamera >> name;
